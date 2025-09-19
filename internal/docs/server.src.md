@@ -35,7 +35,59 @@ notification.
 
 ## Resources
 
-<!-- TODO -->
+In MCP terms, a _resource_ is some data referenced by a URI.
+MCP servers can serve resources to clients.
+They can register resources individually, or register a _resource template_
+that uses a URI pattern to describe a collection of resources.
+
+
+**Client-side**:
+Call [`ClientSession.ReadResource`](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk/mcp#ClientSession.ReadResource)
+to read a resource.
+The SDK ensures that a read succeeds only if the URI matches a registered resource exactly,
+or matches the URI pattern of a resource template.
+
+To list a server's resources and resource templates, use the 
+[`ClientSession.Resources`](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk/mcp#ClientSession.Resources)
+and
+[`ClientSession.ResourceTemplates`](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk/mcp#ClientSession.ResourceTemplates)
+iterators, or the lower-level `ListXXX` calls (see [pagination](#pagination)).
+Set
+[`ClientOptions.ResourceListChangedHandler`](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk/mcp#ClientOptions.ResourceListChangedHandler)
+to be notified of changes in the lists of resources or resource templates.
+
+Clients can be notified when the contents of a resource changes by subscribing to the resource's URI.
+Call
+[`ClientSession.Subscribe`](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk/mcp#ClientSession.Subscribe)
+to subscribe to a resource
+and
+[`ClientSession.Unsubscribe`](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk/mcp#ClientSession.Unsubscribe)
+to unsubscribe.
+Set
+[`ClientOptions.ResourceUpdatedHandler`](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk/mcp#ClientOptions.ResourceUpdatedHandler)
+to be notified of changes to subscribed resources.
+
+**Server-side**:
+Use
+[`Server.AddResource`](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk/mcp#Server.AddResource)
+or
+[`Server.AddResourceTemplate`](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk/mcp#Server.AddResourceTemplate)
+to add a resource or resource template to the server along with its handler.
+A
+[`ResourceHandler`](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk/mcp#ResourceHandler)
+maps a URI to the contents of a resource, which can include text, binary data,
+or both. 
+If `AddResource` or `AddResourceTemplate` is called before a server is connected, the server will have the
+`resources` capability.
+The server will have the `resources` capability if any resource or resource template is added before the
+server is connected to a client, or if
+[`ServerOptions.HasResources`](https://pkg.go.dev/github.com/modelcontextprotocol/go-sdk/mcp#ServerOptions.HasResources)
+is explicitly set. When a prompt is added, any clients already connected to the
+server will be notified via a `notifications/resources/list_changed`
+notification.
+
+
+%include ../../mcp/server_example_test.go resources -
 
 ## Tools
 
