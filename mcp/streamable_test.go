@@ -1310,8 +1310,9 @@ func textContent(t *testing.T, res *CallToolResult) string {
 }
 
 func TestTokenInfo(t *testing.T) {
-	defer func(b bool) { testAuth = b }(testAuth)
-	testAuth = true
+	oldAuth := testAuth.Load()
+	defer testAuth.Store(oldAuth)
+	testAuth.Store(true)
 	ctx := context.Background()
 
 	// Create a server with a tool that returns TokenInfo.
@@ -1429,4 +1430,58 @@ func TestStreamableGET(t *testing.T) {
 	if got, want := resp.StatusCode, http.StatusOK; got != want {
 		t.Errorf("GET with session ID: got status %d, want %d", got, want)
 	}
+}
+
+func TestStreamableClientContextPropagation(t *testing.T) {
+	type contextKey string
+	const testKey = contextKey("test-key")
+	const testValue = "test-value"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx2 := context.WithValue(ctx, testKey, testValue)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.Method {
+		case "POST":
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Mcp-Session-Id", "test-session")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26","capabilities":{},"serverInfo":{"name":"test","version":"1.0"}}}`))
+		case "GET":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+		case "DELETE":
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+
+	transport := &StreamableClientTransport{Endpoint: server.URL}
+	conn, err := transport.Connect(ctx2)
+	if err != nil {
+		t.Fatalf("Connect failed: %v", err)
+	}
+	defer conn.Close()
+
+	streamableConn, ok := conn.(*streamableClientConn)
+	if !ok {
+		t.Fatalf("Expected *streamableClientConn, got %T", conn)
+	}
+
+	if got := streamableConn.ctx.Value(testKey); got != testValue {
+		t.Errorf("Context value not propagated: got %v, want %v", got, testValue)
+	}
+
+	if streamableConn.ctx.Done() == nil {
+		t.Error("Connection context is not cancellable")
+	}
+
+	cancel()
+	select {
+	case <-streamableConn.ctx.Done():
+	case <-time.After(100 * time.Millisecond):
+		t.Error("Connection context was not cancelled when parent was cancelled")
+	}
+
 }
