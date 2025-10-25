@@ -23,9 +23,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/auth"
-	"github.com/modelcontextprotocol/go-sdk/internal/jsonrpc2"
-	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
+	"github.com/orkhanm/go-sdk/auth"
+	"github.com/orkhanm/go-sdk/internal/jsonrpc2"
+	"github.com/orkhanm/go-sdk/jsonrpc"
 )
 
 const (

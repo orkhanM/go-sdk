@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/modelcontextprotocol/go-sdk/auth"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/orkhanm/go-sdk/auth"
+	"github.com/orkhanm/go-sdk/mcp"
 )
 
 // This example demonstrates how to integrate auth.RequireBearerToken middleware

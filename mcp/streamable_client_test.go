@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/modelcontextprotocol/go-sdk/internal/jsonrpc2"
-	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
+	"github.com/orkhanm/go-sdk/internal/jsonrpc2"
+	"github.com/orkhanm/go-sdk/jsonrpc"
 )
 
 type streamableRequestKey struct {

@@ -24,7 +24,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/jsonschema-go/jsonschema"
-	"github.com/modelcontextprotocol/go-sdk/internal/jsonrpc2"
+	"github.com/orkhanm/go-sdk/internal/jsonrpc2"
 )
 
 type hiParams struct {

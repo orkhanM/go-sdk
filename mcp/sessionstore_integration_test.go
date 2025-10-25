@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/internal/jsonrpc2"
-	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
+	"github.com/orkhanm/go-sdk/internal/jsonrpc2"
+	"github.com/orkhanm/go-sdk/jsonrpc"
 )
 
 // TestSessionRecovery tests that sessions can be recovered from the session store

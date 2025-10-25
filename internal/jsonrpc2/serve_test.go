@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/internal/jsonrpc2"
+	"github.com/orkhanm/go-sdk/internal/jsonrpc2"
 )
 
 // needsLocalhostNet skips t if networking does not work for ports opened

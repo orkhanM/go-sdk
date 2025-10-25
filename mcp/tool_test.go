@@ -14,7 +14,7 @@ import (
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
-	"github.com/modelcontextprotocol/go-sdk/internal/jsonrpc2"
+	"github.com/orkhanm/go-sdk/internal/jsonrpc2"
 )
 
 func TestApplySchema(t *testing.T) {

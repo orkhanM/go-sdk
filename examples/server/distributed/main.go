@@ -34,7 +34,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/orkhanm/go-sdk/mcp"
 )
 
 const childPortVar = "MCP_CHILD_PORT"

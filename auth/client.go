@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/modelcontextprotocol/go-sdk/oauthex"
+	"github.com/orkhanm/go-sdk/oauthex"
 	"golang.org/x/oauth2"
 )
 

@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/orkhanm/go-sdk/mcp"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -137,7 +137,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/orkhanm/go-sdk/mcp"
 	"github.com/redis/go-redis/v9"
 )
 

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/orkhanm/go-sdk/mcp"
 	"golang.org/x/time/rate"
 )
 

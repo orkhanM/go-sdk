@@ -19,7 +19,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/modelcontextprotocol/go-sdk/internal/util"
+	"github.com/orkhanm/go-sdk/internal/util"
 )
 
 const defaultProtectedResourceMetadataURI = "/.well-known/oauth-protected-resource"
