@@ -58,6 +58,18 @@ type sessionInfo struct {
 	timer   *time.Timer
 }
 
+// toStored converts sessionInfo to StoredSessionInfo for persistence.
+func (i *sessionInfo) toStored() *StoredSessionInfo {
+	now := time.Now()
+	return &StoredSessionInfo{
+		SessionState:   i.session.State(),
+		Refs:           i.refs,
+		Timeout:        i.timeout,
+		CreatedAt:      now,
+		LastAccessedAt: now,
+	}
+}
+
 // startPOST signals that a POST request for this session is starting (which
 // carries a client->server message), pausing the session timeout if it was
 // running.
@@ -125,7 +137,18 @@ type StreamableHTTPOptions struct {
 	// documentation for [StreamableServerTransport].
 	Stateless bool
 
-	// TODO(#148): support session retention (?)
+	// SessionStore configures persistent session storage.
+	//
+	// If set, sessions will be stored in the provided SessionStore, enabling
+	// session recovery across server restarts and distributed deployments.
+	// This is useful when running multiple MCP server instances behind a load
+	// balancer, as clients can be routed to different instances while maintaining
+	// their session state.
+	//
+	// If nil, sessions are stored in-memory only (using [InMemorySessionStore]).
+	//
+	// Note: SessionStore is only used when Stateless is false.
+	SessionStore SessionStore
 
 	// JSONResponse causes streamable responses to return application/json rather
 	// than text/event-stream ([§2.1.5] of the spec).
@@ -168,6 +191,11 @@ func NewStreamableHTTPHandler(getServer func(*http.Request) *Server, opts *Strea
 
 	if h.opts.Logger == nil { // ensure we have a logger
 		h.opts.Logger = ensureLogger(nil)
+	}
+
+	// Initialize session store if not provided
+	if h.opts.SessionStore == nil && !h.opts.Stateless {
+		h.opts.SessionStore = NewInMemorySessionStore()
 	}
 
 	return h
@@ -229,13 +257,42 @@ func (h *StreamableHTTPHandler) ServeHTTP(w http.ResponseWriter, req *http.Reque
 		h.mu.Lock()
 		sessInfo = h.sessions[sessionID]
 		h.mu.Unlock()
+
+		// If not found in memory and we're using a session store, check if it exists in store.
+		// This enables session recovery when a client is routed to a different server instance.
+		// The actual session recreation happens below in the sessInfo == nil block.
+		if sessInfo == nil && !h.opts.Stateless && h.opts.SessionStore != nil {
+			_, err := h.opts.SessionStore.Get(req.Context(), sessionID)
+			if err != nil && !errors.Is(err, ErrSessionNotFound) {
+				h.opts.Logger.Error("failed to load session from store", "error", err, "session_id", sessionID)
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
+			// If found in store, we'll recreate the session below (sessInfo remains nil for now)
+			// The stored session state will be loaded and used during session creation
+		}
+
 		if sessInfo == nil && !h.opts.Stateless {
 			// Unless we're in 'stateless' mode, which doesn't perform any Session-ID
-			// validation, we require that the session ID matches a known session.
+			// validation, we require that the session ID matches a known session or
+			// exists in the session store (which will be recreated below).
 			//
-			// In stateless mode, a temporary transport is be created below.
-			http.Error(w, "session not found", http.StatusNotFound)
-			return
+			// In stateless mode, a temporary transport is created below.
+			if h.opts.SessionStore == nil {
+				http.Error(w, "session not found", http.StatusNotFound)
+				return
+			}
+			// Check if session exists in store
+			_, err := h.opts.SessionStore.Get(req.Context(), sessionID)
+			if errors.Is(err, ErrSessionNotFound) {
+				http.Error(w, "session not found", http.StatusNotFound)
+				return
+			} else if err != nil {
+				h.opts.Logger.Error("failed to check session in store", "error", err, "session_id", sessionID)
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
+			// Session exists in store, it will be recreated below
 		}
 	}
 
@@ -327,6 +384,7 @@ func (h *StreamableHTTPHandler) ServeHTTP(w http.ResponseWriter, req *http.Reque
 		// To support stateless mode, we initialize the session with a default
 		// state, so that it doesn't reject subsequent requests.
 		var connectOpts *ServerSessionOptions
+		var recoveredTimeout time.Duration
 		if h.opts.Stateless {
 			// Peek at the body to see if it is initialize or initialized.
 			// We want those to be handled as usual.
@@ -388,7 +446,28 @@ func (h *StreamableHTTPHandler) ServeHTTP(w http.ResponseWriter, req *http.Reque
 							h.onTransportDeletion(transport.SessionID)
 						}
 					}
+					// Also delete from persistent store
+					if h.opts.SessionStore != nil {
+						if err := h.opts.SessionStore.Delete(context.Background(), transport.SessionID); err != nil {
+							h.opts.Logger.Error("failed to delete session from store", "error", err, "session_id", transport.SessionID)
+						}
+					}
 				},
+			}
+
+			// Try to recover session state from the store if available
+			if h.opts.SessionStore != nil && sessionID != "" {
+				stored, err := h.opts.SessionStore.Get(req.Context(), sessionID)
+				if err == nil {
+					// Session found in store, use its state to initialize the new session
+					connectOpts.State = &stored.SessionState
+					recoveredTimeout = stored.Timeout
+					h.opts.Logger.Info("recovered session from store", "session_id", sessionID)
+				} else if !errors.Is(err, ErrSessionNotFound) {
+					// Unexpected error
+					h.opts.Logger.Warn("failed to recover session from store", "error", err, "session_id", sessionID)
+				}
+				// If ErrSessionNotFound, this is a new session, proceed with default initialization
 			}
 		}
 
@@ -415,8 +494,13 @@ func (h *StreamableHTTPHandler) ServeHTTP(w http.ResponseWriter, req *http.Reque
 			//
 			// Note that the timer here may fire multiple times, but
 			// sessInfo.session.Close is idempotent.
-			if h.opts.SessionTimeout > 0 {
-				sessInfo.timeout = h.opts.SessionTimeout
+			timeout := h.opts.SessionTimeout
+			if recoveredTimeout > 0 {
+				// Use recovered timeout from store if available
+				timeout = recoveredTimeout
+			}
+			if timeout > 0 {
+				sessInfo.timeout = timeout
 				sessInfo.timer = time.AfterFunc(sessInfo.timeout, func() {
 					sessInfo.session.Close()
 				})
@@ -424,6 +508,21 @@ func (h *StreamableHTTPHandler) ServeHTTP(w http.ResponseWriter, req *http.Reque
 			h.mu.Lock()
 			h.sessions[transport.SessionID] = sessInfo
 			h.mu.Unlock()
+
+			// Save session to persistent store
+			if h.opts.SessionStore != nil {
+				stored := sessInfo.toStored()
+				ttl := h.opts.SessionTimeout
+				if ttl <= 0 {
+					// If no timeout is set, use a default TTL of 24 hours for the store
+					// This prevents unlimited growth of the session store
+					ttl = 24 * time.Hour
+				}
+				if err := h.opts.SessionStore.Put(req.Context(), transport.SessionID, stored, ttl); err != nil {
+					h.opts.Logger.Error("failed to save session to store", "error", err, "session_id", transport.SessionID)
+					// Don't fail the request if store persistence fails
+				}
+			}
 		}
 	}
 

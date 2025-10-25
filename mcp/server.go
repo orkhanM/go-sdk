@@ -946,6 +946,13 @@ func (ss *ServerSession) updateState(mut func(*ServerSessionState)) {
 	}
 }
 
+// State returns a copy of the current session state.
+func (ss *ServerSession) State() ServerSessionState {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.state
+}
+
 // hasInitialized reports whether the server has received the initialized
 // notification.
 //
