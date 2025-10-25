@@ -377,6 +377,8 @@ func (h *StreamableHTTPHandler) ServeHTTP(w http.ResponseWriter, req *http.Reque
 			SessionID:    sessionID,
 			Stateless:    h.opts.Stateless,
 			EventStore:   h.opts.EventStore,
+			SessionStore: h.opts.SessionStore,
+			Timeout:      h.opts.SessionTimeout,
 			jsonResponse: h.opts.JSONResponse,
 			logger:       h.opts.Logger,
 		}
@@ -576,6 +578,18 @@ type StreamableServerTransport struct {
 	// upon stream resumption.
 	EventStore EventStore
 
+	// SessionStore enables persistent session storage for distributed deployments.
+	//
+	// When set, session state will be persisted to the store whenever it changes,
+	// allowing sessions to be recovered when requests are routed to different
+	// server instances.
+	SessionStore SessionStore
+
+	// Timeout is the session timeout duration.
+	//
+	// Used when updating session state in the SessionStore.
+	Timeout time.Duration
+
 	// jsonResponse, if set, tells the server to prefer to respond to requests
 	// using application/json responses rather than text/event-stream.
 	//
@@ -608,6 +622,8 @@ func (t *StreamableServerTransport) Connect(ctx context.Context) (Connection, er
 		sessionID:      t.SessionID,
 		stateless:      t.Stateless,
 		eventStore:     t.EventStore,
+		sessionStore:   t.SessionStore,
+		timeout:        t.Timeout,
 		jsonResponse:   t.jsonResponse,
 		logger:         ensureLogger(t.logger), // see #556: must be non-nil
 		incoming:       make(chan jsonrpc.Message, 10),
@@ -632,6 +648,8 @@ type streamableServerConn struct {
 	stateless    bool
 	jsonResponse bool
 	eventStore   EventStore
+	sessionStore SessionStore // for persisting session state updates
+	timeout      time.Duration // session timeout for store updates
 
 	logger *slog.Logger
 
@@ -666,6 +684,40 @@ type streamableServerConn struct {
 
 func (c *streamableServerConn) SessionID() string {
 	return c.sessionID
+}
+
+// sessionUpdated implements serverConnection interface to update session state in the store.
+// This is called whenever the session state changes (e.g., after initialize, initialized).
+func (c *streamableServerConn) sessionUpdated(state ServerSessionState) {
+	// Don't persist in stateless mode or if no store is configured
+	if c.stateless || c.sessionStore == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Create StoredSessionInfo with the updated state
+	stored := &StoredSessionInfo{
+		SessionState:   state,
+		Refs:           0, // Refs are managed by the handler, not here
+		Timeout:        c.timeout,
+		CreatedAt:      time.Now(), // Note: ideally we'd preserve the original CreatedAt
+		LastAccessedAt: time.Now(),
+	}
+
+	// Calculate TTL
+	ttl := c.timeout
+	if ttl <= 0 {
+		ttl = 24 * time.Hour // Default TTL
+	}
+
+	// Update the session in the store
+	if err := c.sessionStore.Put(ctx, c.sessionID, stored, ttl); err != nil {
+		c.logger.Error("failed to update session in store", "error", err, "session_id", c.sessionID)
+	} else {
+		c.logger.Debug("updated session state in store", "session_id", c.sessionID, "initialized", state.InitializedParams != nil)
+	}
 }
 
 // A stream is a single logical stream of SSE events within a server session.

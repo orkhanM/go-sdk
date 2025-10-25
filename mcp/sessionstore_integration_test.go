@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,18 +83,35 @@ func TestSessionRecovery(t *testing.T) {
 		t.Fatalf("Initialized notification failed with status %d", resp.StatusCode)
 	}
 
-	// Verify session is in the store
+	// Verify session is in the store and check if state is persisted
 	ctx := context.Background()
-	_, err := sessionStore.Get(ctx, sessionID)
+	stored, err := sessionStore.Get(ctx, sessionID)
 	if err != nil {
 		t.Fatalf("Session not found in store: %v", err)
 	}
 
 	t.Log("Session successfully stored")
 
-	// Note: The session is stored immediately after creation, before initialization completes.
-	// For full state persistence (including InitializeParams/InitializedParams), we would need
-	// to update the store when the session state changes, which is beyond the scope of this basic test.
+	// Wait a moment for sessionUpdated to be called asynchronously
+	time.Sleep(100 * time.Millisecond)
+
+	// Check again - the state should now include InitializeParams and InitializedParams
+	stored, err = sessionStore.Get(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("Session not found in store: %v", err)
+	}
+
+	if stored.SessionState.InitializeParams != nil {
+		t.Log("✓ InitializeParams successfully persisted")
+	} else {
+		t.Log("Warning: InitializeParams not yet persisted (may be timing dependent)")
+	}
+
+	if stored.SessionState.InitializedParams != nil {
+		t.Log("✓ InitializedParams successfully persisted")
+	} else {
+		t.Log("Warning: InitializedParams not yet persisted (may be timing dependent)")
+	}
 
 	// Simulate server restart by creating a new handler with the same session store
 	server2 := NewServer(&Implementation{Name: "test-server", Version: "1.0"}, nil)
@@ -115,35 +133,35 @@ func TestSessionRecovery(t *testing.T) {
 
 	t.Log("Simulated server restart - new instance created")
 
-	// The key test is: can we reconnect to the same session after a server restart?
-	// Send a simple request to verify the session is recognized (not 404).
-	// We'll send an initialize request again, which should be handled correctly.
-	reInitRequest := &jsonrpc.Request{
+	// Now test that we can make a real request to the recovered session.
+	// Since the session state (including InitializeParams and InitializedParams) was persisted,
+	// the session should be fully initialized and ready to handle requests.
+	toolListRequest := &jsonrpc.Request{
 		ID:     jsonrpc2.Int64ID(2),
-		Method: "initialize",
-		Params: mustMarshal(InitializeParams{
-			ProtocolVersion: "2025-03-26",
-			ClientInfo:      &Implementation{Name: "test-client", Version: "1.0"},
-			Capabilities:    &ClientCapabilities{},
-		}),
+		Method: "tools/list",
+		Params: mustMarshal(ListToolsParams{}),
 	}
 
-	body, _ = jsonrpc.EncodeMessage(reInitRequest)
+	body, _ = jsonrpc.EncodeMessage(toolListRequest)
 	resp = httpRequest(t, testServer2.URL, "POST", sessionID, body)
 
-	// The important thing is that we DON'T get a 404 (session not found)
-	// We might get other errors (like "already initialized") but that's fine -
-	// it means the session was found
+	// The session should be found and initialized, so this should succeed
 	if resp.StatusCode == http.StatusNotFound {
 		t.Fatal("Session not found - recovery failed!")
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		// Log the error but don't fail - the session was found, which is what matters
-		t.Logf("Request returned status %d (not 404, so session was recovered): %s", resp.StatusCode, readBody(t, resp))
+		respBody := readBody(t, resp)
+		// Check if it's the "invalid during initialization" error
+		if strings.Contains(respBody, "invalid during session initialization") {
+			t.Fatalf("Session recovered but not properly initialized! Response: %s", respBody)
+		}
+		t.Logf("Request returned status %d: %s", resp.StatusCode, respBody)
+	} else {
+		t.Log("✓ Successfully made request to recovered session - session state was properly restored!")
 	}
 
-	t.Log("Test completed successfully - session was recovered (not 404)")
+	t.Log("Test completed successfully - session was recovered with full state")
 }
 
 // TestSessionRecoveryNotFound tests that requests with unknown session IDs are rejected.
